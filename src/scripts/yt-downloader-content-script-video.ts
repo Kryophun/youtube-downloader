@@ -27,6 +27,7 @@ function toggleNativeDownload(isVisible: boolean) {
 }
 
 export async function handleVideo(): Promise<void> {
+  console.log(`YT Downloader: handleVideo()`);
   const getHtml = async () => {
     const abortController = new AbortController();
     gCancelControllers.push(abortController);
@@ -37,6 +38,7 @@ export async function handleVideo(): Promise<void> {
   };
 
   const videoData = await getVideoData(await getHtml());
+  console.log(`YT Downloader: videoData`, videoData);
 
   const elDownloaderContainer = document.createElement("div");
   elDownloaderContainer.id = "ytdl-download-container";
@@ -53,6 +55,7 @@ export async function handleVideo(): Promise<void> {
   }
 
   elButtonAfterRating.parentElement.insertBefore(elDownloaderContainer, elButtonAfterRating);
+  console.log(`Done inserting before`);
 
   const { videoId, title } = videoData.videoDetails;
 

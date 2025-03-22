@@ -104,6 +104,7 @@ export async function getVideoEventually(): Promise<HTMLVideoElement> {
   return new Promise(async resolve => {
     new MutationObserver((_, observer) => {
       const elVideo = document.querySelector("video");
+      console.log("elVideo", elVideo);
       if (elVideo.videoHeight > 0) {
         observer.disconnect();
         resolve(elVideo);

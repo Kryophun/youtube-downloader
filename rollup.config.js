@@ -10,7 +10,8 @@ import scss from "rollup-plugin-scss";
 import replace from "rollup-plugin-replace";
 import css from "rollup-plugin-css-only";
 
-const isProduction = !process.env.ROLLUP_WATCH;
+//const isProduction = !process.env.ROLLUP_WATCH;
+const isProduction = false;
 
 function createConfig(filename, useSvelte = false) {
   return {

@@ -548,6 +548,12 @@ async function processCurrentVideoWhenAvailable() {
 }
 
 function addListeners() {
+  console.log(`!!!!backgroudn script started!!!!`);
+
+  chrome.browserAction.onClicked.addListener(() => {
+    console.log("BUTTON CLICKED!");
+  });
+
   chrome.storage.onChanged.addListener(async changes => {
     const videoQueueCurrent = changes.videoQueue?.newValue as VideoQueue;
     const videoQueuePrev = changes.videoQueue?.oldValue as VideoQueue;
@@ -581,6 +587,7 @@ async function emptyTempStorage() {
 }
 
 async function init() {
+  console.log(`!!!!!INIT!!!!!!!`);
   addWatchers();
   listenToTabs();
   addListeners();

@@ -144,16 +144,16 @@ async function init() {
   await handlePlaylistVideos();
 }
 
-new MutationObserver(async (_, observer) => {
-  const isReadyForProcessing = Boolean(document.querySelector("title"));
-  if (!isReadyForProcessing) {
-    return;
-  }
+// new MutationObserver(async (_, observer) => {
+//   const isReadyForProcessing = Boolean(document.querySelector("title"));
+//   if (!isReadyForProcessing) {
+//     return;
+//   }
 
-  observer.disconnect();
+//   observer.disconnect();
 
-  attachToBackground();
-  addNavigationListener();
+//   attachToBackground();
+//   addNavigationListener();
 
-  await init();
-}).observe(document.documentElement, gObserverOptions);
+//   await init();
+// }).observe(document.documentElement, gObserverOptions);
