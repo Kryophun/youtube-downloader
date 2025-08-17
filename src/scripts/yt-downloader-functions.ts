@@ -233,8 +233,14 @@ async function getAdaptiveFormats({
     console.log("getAdaptiveFormats: Processing", adaptiveFormats.length, "adaptive formats");
 
     adaptiveFormats.forEach(format => {
-      format.url = getUrlFromSignature(format.signatureCipher);
-      delete format.signatureCipher;
+      // Only process formats that actually have a signatureCipher
+      if (format.signatureCipher) {
+        console.log("getAdaptiveFormats: Processing signatureCipher for format", format.itag);
+        format.url = getUrlFromSignature(format.signatureCipher);
+        delete format.signatureCipher;
+      } else {
+        console.log("getAdaptiveFormats: Format", format.itag, "already has direct URL, skipping");
+      }
     });
 
     return adaptiveFormats;
@@ -262,6 +268,124 @@ async function getDownloadableLinks(formats: AdaptiveFormatItem[] | FormatItem[]
 export async function getVideoData(htmlYouTubePage: string): Promise<PlayerResponse> {
   console.log("getVideoData: Starting video data extraction");
 
+  // Check for alternative streaming data sources in the HTML
+  console.log("getVideoData: Checking for alternative streaming data sources...");
+
+  // First try: Custom streaming data extractor with proper brace counting
+  const findCompleteStreamingData = (html: string) => {
+    const streamingDataMatch = html.match(/"streamingData":\s*\{/);
+    if (streamingDataMatch) {
+      const startIndex = streamingDataMatch.index! + streamingDataMatch[0].length - 1;
+
+      // Extract complete JSON object by counting braces
+      let braceCount = 0;
+      let endIndex = startIndex;
+
+      for (let i = startIndex; i < html.length; i++) {
+        if (html[i] === "{") braceCount++;
+        else if (html[i] === "}") braceCount--;
+
+        if (braceCount === 0) {
+          endIndex = i;
+          break;
+        }
+      }
+
+      const streamingDataJson = html.substring(startIndex, endIndex + 1);
+
+      // Check if this contains URLs
+      if (streamingDataJson.includes('"url"') && streamingDataJson.includes("https://")) {
+        console.log("getVideoData: Found streaming data with URLs using custom extractor");
+        console.log("getVideoData: Streaming data preview:", streamingDataJson.substring(0, 200) + "...");
+        try {
+          const streamingData = JSON.parse(streamingDataJson);
+          return { streamingData };
+        } catch (error) {
+          console.log("getVideoData: Failed to parse custom extracted streaming data:", error);
+        }
+      }
+    }
+    return null;
+  };
+
+  let streamingDataWithUrls = findCompleteStreamingData(htmlYouTubePage);
+
+  // Second try: Use regex patterns if custom extractor didn't work
+  if (!streamingDataWithUrls) {
+    // Look for different YouTube data patterns - use more specific patterns to capture complete streaming data
+    const alternativePatterns = [
+      /"streamingData":\s*(\{[^{}]*"formats":\s*\[[^\]]*\][^{}]*"adaptiveFormats":\s*\[[^\]]*\][^{}]*\})/,
+      /"streamingData":\s*(\{(?:[^{}]|{[^{}]*})*\})/,
+      /var ytInitialPlayerResponse = ({.+?});/,
+      /window\["ytInitialPlayerResponse"\] = ({.+?});/
+    ];
+
+    for (let i = 0; i < alternativePatterns.length; i++) {
+      const match = htmlYouTubePage.match(alternativePatterns[i]);
+      if (match) {
+        console.log(`getVideoData: Found alternative pattern ${i}:`, match[1].substring(0, 100) + "...");
+
+        // Check if this pattern contains URLs
+        if (match[1].includes('"url"') && match[1].includes("https://")) {
+          console.log(`getVideoData: Pattern ${i} contains URLs! Using this as streaming data source`);
+          try {
+            const parsedData = JSON.parse(match[1]);
+
+            // Check if this is direct streaming data or a full player response
+            if (parsedData.adaptiveFormats) {
+              // This is direct streaming data
+              streamingDataWithUrls = { streamingData: parsedData };
+              console.log("getVideoData: Successfully parsed direct streaming data");
+            } else if (parsedData.streamingData) {
+              // This is a full player response
+              streamingDataWithUrls = parsedData;
+              console.log("getVideoData: Successfully parsed full player response");
+            } else {
+              console.log("getVideoData: Parsed data doesn't contain expected streaming structure");
+              continue;
+            }
+            console.log("getVideoData: Alternative data keys:", Object.keys(streamingDataWithUrls));
+            console.log(
+              "getVideoData: Has adaptiveFormats?",
+              !!streamingDataWithUrls.streamingData?.adaptiveFormats
+            );
+            console.log("getVideoData: Has formats?", !!streamingDataWithUrls.streamingData?.formats);
+            console.log("getVideoData: Has streamingData?", !!streamingDataWithUrls.streamingData);
+            if (streamingDataWithUrls.streamingData) {
+              console.log(
+                "getVideoData: streamingData keys:",
+                Object.keys(streamingDataWithUrls.streamingData)
+              );
+              console.log(
+                "getVideoData: Has streamingData.adaptiveFormats?",
+                !!streamingDataWithUrls.streamingData.adaptiveFormats
+              );
+              console.log(
+                "getVideoData: Has streamingData.formats?",
+                !!streamingDataWithUrls.streamingData.formats
+              );
+            }
+            if (streamingDataWithUrls.streamingData?.adaptiveFormats) {
+              console.log(
+                "getVideoData: Alternative adaptiveFormats count:",
+                streamingDataWithUrls.streamingData.adaptiveFormats.length
+              );
+            }
+            if (streamingDataWithUrls.streamingData?.formats) {
+              console.log(
+                "getVideoData: Alternative formats count:",
+                streamingDataWithUrls.streamingData.formats.length
+              );
+            }
+            break;
+          } catch (error) {
+            console.log(`getVideoData: Failed to parse pattern ${i}:`, error);
+          }
+        }
+      }
+    }
+  }
+
   // Extract video data with better error handling and logging
   const videoDataMatch = htmlYouTubePage.match(gRegex.videoData);
   if (!videoDataMatch) {
@@ -273,6 +397,15 @@ export async function getVideoData(htmlYouTubePage: string): Promise<PlayerRespo
 
   console.log("getVideoData: Successfully matched ytInitialPlayerResponse");
   console.log("getVideoData: Raw video data length:", videoDataMatch[1].length);
+  console.log("getVideoData: Raw video data first 500 chars:", videoDataMatch[1].substring(0, 500));
+
+  // Check if raw data contains streaming URLs before parsing
+  console.log("getVideoData: Checking raw data for URL patterns...");
+  console.log('- Contains "url":', videoDataMatch[1].includes('"url"'));
+  console.log('- Contains "signatureCipher":', videoDataMatch[1].includes('"signatureCipher"'));
+  console.log('- Contains "cipher":', videoDataMatch[1].includes('"cipher"'));
+  console.log('- Contains "https://":', videoDataMatch[1].includes("https://"));
+  console.log('- Contains "adaptiveFormats":', videoDataMatch[1].includes('"adaptiveFormats"'));
 
   let videoData: PlayerResponse;
   try {
@@ -295,6 +428,110 @@ export async function getVideoData(htmlYouTubePage: string): Promise<PlayerRespo
     return videoData;
   }
 
+  // If we found alternative streaming data with URLs, use that instead
+  console.log("getVideoData: Checking alternative streaming data usage...");
+  console.log("getVideoData: streamingDataWithUrls exists?", !!streamingDataWithUrls);
+  if (streamingDataWithUrls) {
+    console.log("getVideoData: streamingDataWithUrls keys:", Object.keys(streamingDataWithUrls));
+    console.log("getVideoData: has adaptiveFormats?", !!streamingDataWithUrls.streamingData?.adaptiveFormats);
+    console.log("getVideoData: has streamingData?", !!streamingDataWithUrls.streamingData);
+    if (streamingDataWithUrls.streamingData) {
+      console.log(
+        "getVideoData: has streamingData.adaptiveFormats?",
+        !!streamingDataWithUrls.streamingData.adaptiveFormats
+      );
+    }
+  }
+
+  if (
+    streamingDataWithUrls &&
+    streamingDataWithUrls.streamingData &&
+    (streamingDataWithUrls.streamingData.adaptiveFormats || streamingDataWithUrls.streamingData.formats)
+  ) {
+    console.log("getVideoData: Using alternative streaming data with URLs");
+
+    // Debug both format arrays
+    if (streamingDataWithUrls.streamingData.formats) {
+      console.log(
+        "getVideoData: Alternative formats count:",
+        streamingDataWithUrls.streamingData.formats.length
+      );
+      const firstFormat = streamingDataWithUrls.streamingData.formats[0];
+      console.log("getVideoData: First format properties:", Object.keys(firstFormat));
+      console.log("getVideoData: First format has url?", !!firstFormat.url);
+      console.log(
+        "getVideoData: First format url:",
+        firstFormat.url ? firstFormat.url.substring(0, 100) + "..." : "undefined"
+      );
+    }
+
+    if (streamingDataWithUrls.streamingData.adaptiveFormats) {
+      console.log(
+        "getVideoData: Alternative adaptiveFormats count:",
+        streamingDataWithUrls.streamingData.adaptiveFormats.length
+      );
+      const firstAltFormat = streamingDataWithUrls.streamingData.adaptiveFormats[0];
+      console.log("getVideoData: First alternative format properties:", Object.keys(firstAltFormat));
+      console.log("getVideoData: First alternative format has url?", !!firstAltFormat.url);
+      console.log(
+        "getVideoData: First alternative format url:",
+        firstAltFormat.url ? firstAltFormat.url.substring(0, 100) + "..." : "undefined"
+      );
+    }
+
+    // Replace the formats with the ones that have URLs
+    if (!videoData.streamingData) {
+      videoData.streamingData = {
+        expiresInSeconds: streamingDataWithUrls.streamingData.expiresInSeconds || "21600",
+        formats: [],
+        adaptiveFormats: []
+      };
+    }
+
+    // Replace adaptiveFormats if they exist and have URLs
+    if (streamingDataWithUrls.streamingData.adaptiveFormats) {
+      videoData.streamingData.adaptiveFormats = streamingDataWithUrls.streamingData.adaptiveFormats;
+    }
+
+    // Replace regular formats if they exist and have URLs
+    if (streamingDataWithUrls.streamingData.formats) {
+      videoData.streamingData.formats = streamingDataWithUrls.streamingData.formats;
+    }
+
+    // Debug: Verify the replacement worked
+    if (videoData.streamingData.adaptiveFormats && videoData.streamingData.adaptiveFormats.length > 0) {
+      const firstReplacedFormat = videoData.streamingData.adaptiveFormats[0];
+      console.log(
+        "getVideoData: After replacement - first adaptiveFormat properties:",
+        Object.keys(firstReplacedFormat)
+      );
+      console.log(
+        "getVideoData: After replacement - first adaptiveFormat has url?",
+        !!firstReplacedFormat.url
+      );
+      console.log(
+        "getVideoData: After replacement - first adaptiveFormat url:",
+        firstReplacedFormat.url ? firstReplacedFormat.url.substring(0, 100) + "..." : "undefined"
+      );
+    }
+
+    if (videoData.streamingData.formats && videoData.streamingData.formats.length > 0) {
+      const firstReplacedFormat = videoData.streamingData.formats[0];
+      console.log(
+        "getVideoData: After replacement - first format properties:",
+        Object.keys(firstReplacedFormat)
+      );
+      console.log("getVideoData: After replacement - first format has url?", !!firstReplacedFormat.url);
+      console.log(
+        "getVideoData: After replacement - first format url:",
+        firstReplacedFormat.url ? firstReplacedFormat.url.substring(0, 100) + "..." : "undefined"
+      );
+    }
+
+    console.log("getVideoData: Successfully replaced formats with URL-enabled versions");
+    return videoData;
+  }
+
   const formats = videoData.streamingData?.adaptiveFormats || videoData.streamingData?.formats;
   console.log("getVideoData: Found formats count:", formats?.length || 0);
 
@@ -303,7 +540,30 @@ export async function getVideoData(htmlYouTubePage: string): Promise<PlayerRespo
     return videoData;
   }
 
-  const isHasStreamingUrls = Boolean(formats[0]?.url);
+  console.log("getVideoData: First format details:", {
+    hasUrl: !!formats[0]?.url,
+    url: formats[0]?.url,
+    hasSignatureCipher: !!(formats[0] as Record<string, unknown>)?.["signatureCipher"],
+    signatureCipher: (formats[0] as Record<string, unknown>)?.["signatureCipher"]
+  });
+
+  // Debug: Log all properties of the first format to see what's available
+  console.log("getVideoData: First format all properties:", Object.keys(formats[0] || {}));
+  console.log("getVideoData: First format complete object:", formats[0]);
+
+  // Check for alternative property names YouTube might use for URLs
+  const firstFormat = formats[0] as Record<string, unknown>;
+  console.log("getVideoData: Looking for URL-related properties:");
+  console.log("- url:", firstFormat.url);
+  console.log("- signatureCipher:", firstFormat.signatureCipher);
+  console.log("- cipher:", firstFormat.cipher);
+  console.log("- streamingUrl:", firstFormat.streamingUrl);
+  console.log("- baseUrl:", firstFormat.baseUrl);
+  console.log("- audioUrl:", firstFormat.audioUrl);
+
+  const isHasStreamingUrls = Boolean(
+    formats[0]?.url && formats[0].url !== "null&null=" && formats[0].url.startsWith("http")
+  );
   console.log("getVideoData: Has streaming URLs:", isHasStreamingUrls);
 
   if (isHasStreamingUrls) {
