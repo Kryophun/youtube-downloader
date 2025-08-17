@@ -112,6 +112,7 @@ function addNavigationListener() {
 }
 
 async function init() {
+  console.log(`In init()`);
   const isValidPage = Boolean(location.pathname.match(/watch|playlist/));
   if (!isValidPage) {
     return;

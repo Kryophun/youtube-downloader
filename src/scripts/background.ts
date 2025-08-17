@@ -11,6 +11,7 @@ import type {
 } from "./types";
 import { watch } from "@vue/runtime-core";
 import { ref } from "@vue/reactivity";
+import { handleVideo } from "./yt-downloader-content-script-video";
 
 const gCancelControllers: {
   [videoId: string]: {
@@ -52,7 +53,7 @@ async function initializeFFmpeg() {
 async function restartFFmpeg() {
   exitFFmpeg();
   await initializeFFmpeg();
-  processCurrentVideoWhenAvailable();
+  // processCurrentVideoWhenAvailable();
 }
 
 function cancelOngoingDownloads(videoIds = Object.keys(gCancelControllers)) {
@@ -534,12 +535,15 @@ function delay() {
 
 async function processCurrentVideoWhenAvailable() {
   while (1) {
+    console.log(`Trying to process current video...`);
     const videoId = gVideoQueue[0];
     if (!videoId || !gFfmpeg.isLoaded()) {
+      console.log(`No video to process; sleeping...`);
       await delay();
       continue;
     }
 
+    console.log(`Processing video ${videoId}...`);
     await processVideo({
       videoId,
       ...gVideoDetails.value[videoId]
@@ -552,6 +556,7 @@ function addListeners() {
 
   chrome.browserAction.onClicked.addListener(() => {
     console.log("BUTTON CLICKED!");
+    handleVideo();
   });
 
   chrome.storage.onChanged.addListener(async changes => {
@@ -592,7 +597,9 @@ async function init() {
   listenToTabs();
   addListeners();
   await initializeFFmpeg();
-  await processCurrentVideoWhenAvailable();
+  // await processCurrentVideoWhenAvailable();
 }
+
+console.log(`HI THERE!`);
 
 init();
