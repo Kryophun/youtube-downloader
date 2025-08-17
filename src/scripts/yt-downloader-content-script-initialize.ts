@@ -145,6 +145,18 @@ async function init() {
   await handlePlaylistVideos();
 }
 
+// Add message listener for background script communication
+console.log(`Adding listener for video message...`);
+chrome.runtime.onMessage.addListener(message => {
+  if (message.action === "handleVideo") {
+    console.log("Received handleVideo message from background script");
+    handleVideo().catch(error => {
+      console.error("Error handling video from background message:", error);
+    });
+    return true; // Indicate we will respond asynchronously
+  }
+});
+
 // new MutationObserver(async (_, observer) => {
 //   const isReadyForProcessing = Boolean(document.querySelector("title"));
 //   if (!isReadyForProcessing) {

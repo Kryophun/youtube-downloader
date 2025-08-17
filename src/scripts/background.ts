@@ -11,7 +11,6 @@ import type {
 } from "./types";
 import { watch } from "@vue/runtime-core";
 import { ref } from "@vue/reactivity";
-import { handleVideo } from "./yt-downloader-content-script-video";
 
 const gCancelControllers: {
   [videoId: string]: {
@@ -554,9 +553,21 @@ async function processCurrentVideoWhenAvailable() {
 function addListeners() {
   console.log(`!!!!backgroudn script started!!!!`);
 
-  chrome.browserAction.onClicked.addListener(() => {
+  chrome.browserAction.onClicked.addListener(async () => {
     console.log("BUTTON CLICKED!");
-    handleVideo();
+
+    // Get the current active tab
+    const tabs = await new Promise<chrome.tabs.Tab[]>(resolve => {
+      chrome.tabs.query({ active: true, currentWindow: true }, resolve);
+    });
+
+    if (tabs.length > 0 && tabs[0].id) {
+      // Send message to content script to handle video
+      console.log("Sending handleVideo message to content script");
+      chrome.tabs.sendMessage(tabs[0].id, {
+        action: "handleVideo"
+      });
+    }
   });
 
   chrome.storage.onChanged.addListener(async changes => {

@@ -30,36 +30,218 @@ async function getAdaptiveFormats({
   videoData: PlayerResponse;
   playerData: { PLAYER_JS_URL: string };
 }) {
-  const getUrlFromSignature = (signatureCipher: string): string => {
-    const searchParams = new URLSearchParams(signatureCipher);
-    const [url, signature, sp] = [searchParams.get("url"), searchParams.get("s"), searchParams.get("sp")];
-
-    return `${url}&${sp}=${decipher(signature)}`;
-  };
+  console.log("getAdaptiveFormats: Starting signature deciphering process");
+  console.log("getAdaptiveFormats: Player JS URL:", playerData.PLAYER_JS_URL);
 
   // eslint-disable-next-line @typescript-eslint/ban-types
   const getDecipherFunction = (string: string): Function => {
-    const js = string.replace("var _yt_player={}", "");
-    const top = getStringBetween(js, `a=a.split("")`, "};", 1, -28);
-    const beginningOfFunction =
-      "var " + getStringBetween(top, `a=a.split("")`, "(", 10, 1).split(".")[0] + "=";
-    const side = getStringBetween(js, beginningOfFunction, "};", 2, -beginningOfFunction.length);
-    return eval(side + top);
+    console.log("getDecipherFunction: Starting to parse player JS");
+    console.log("getDecipherFunction: Input string length:", string.length);
+    console.log("getDecipherFunction: First 200 chars:", string.substring(0, 200));
+    console.log("getDecipherFunction: Last 200 chars:", string.substring(string.length - 200));
+
+    try {
+      const js = string.replace("var _yt_player={}", "");
+      console.log("getDecipherFunction: After _yt_player replacement, length:", js.length);
+
+      // Look for split patterns dynamically
+      console.log("getDecipherFunction: Looking for split patterns...");
+      const splitMatches = js.match(/[a-zA-Z]=\w+\.split\(""\)/g);
+      console.log("getDecipherFunction: Found split patterns:", splitMatches?.slice(0, 5));
+
+      if (!splitMatches || splitMatches.length === 0) {
+        throw new Error("No split patterns found in player JS");
+      }
+
+      // Use the first found pattern
+      const splitPattern = splitMatches[0];
+      console.log("getDecipherFunction: Using split pattern:", splitPattern);
+
+      const splitIndex = js.indexOf(splitPattern);
+      console.log("getDecipherFunction: Pattern found at index:", splitIndex);
+
+      const top = getStringBetween(js, splitPattern, "};", 1, -28);
+      console.log("getDecipherFunction: Extracted top length:", top.length);
+      console.log("getDecipherFunction: Extracted top:", top.substring(0, 200) + "...");
+
+      // Extract function name from the split pattern itself
+      // Pattern is like "e=e.split("")", so we need to find what calls this
+      // Look for the function that contains this pattern
+      const contextBefore = js.substring(splitIndex - 500, splitIndex);
+      console.log(
+        "getDecipherFunction: Context before split:",
+        contextBefore.substring(contextBefore.length - 100)
+      );
+
+      // Find the function declaration pattern before the split
+      const functionMatch = contextBefore.match(
+        /([a-zA-Z$_][a-zA-Z0-9$_]*)\s*=\s*function\s*\([^)]*\)\s*\{[^}]*$/
+      );
+      let functionName;
+
+      if (functionMatch) {
+        functionName = functionMatch[1];
+        console.log("getDecipherFunction: Found function name from context:", functionName);
+      } else {
+        // Fallback: try to extract from the pattern itself
+        const varMatch = splitPattern.match(/([a-zA-Z$_][a-zA-Z0-9$_]*)\s*=/);
+        if (varMatch) {
+          functionName = varMatch[1];
+          console.log("getDecipherFunction: Extracted function name from pattern:", functionName);
+        } else {
+          throw new Error("Could not extract function name from split pattern");
+        }
+      }
+
+      console.log("getDecipherFunction: Using function name:", functionName);
+
+      // Check if this pattern exists in the JS
+      let actualPattern = "var " + functionName + "=";
+      let functionIndex = js.indexOf(actualPattern);
+      console.log("getDecipherFunction: Function pattern found at index:", functionIndex);
+
+      if (functionIndex === -1) {
+        console.log("getDecipherFunction: Trying alternative function patterns...");
+        // Try different patterns
+        const patterns = [
+          `${functionName}=function`,
+          `${functionName}:function`,
+          `function ${functionName}`,
+          `${functionName}=`
+        ];
+
+        for (const pattern of patterns) {
+          const altIndex = js.indexOf(pattern);
+          console.log(`getDecipherFunction: Pattern "${pattern}" found at:`, altIndex);
+          if (altIndex !== -1) {
+            console.log(
+              `getDecipherFunction: Context around "${pattern}":`,
+              js.substring(altIndex - 50, altIndex + 200)
+            );
+            actualPattern = pattern;
+            functionIndex = altIndex;
+            break;
+          }
+        }
+
+        if (functionIndex === -1) {
+          throw new Error(`Function pattern for "${functionName}" not found in player JS`);
+        }
+      }
+
+      console.log("getDecipherFunction: Using pattern:", actualPattern);
+      console.log("getDecipherFunction: Pattern found at index:", functionIndex);
+
+      // Instead of using getStringBetween, manually find the complete function
+      const functionStart = js.indexOf(actualPattern);
+      const functionBodyStart = js.indexOf("{", functionStart);
+
+      if (functionBodyStart === -1) {
+        throw new Error("Could not find function body start");
+      }
+
+      // Find the matching closing brace by counting braces
+      let braceCount = 1;
+      let currentIndex = functionBodyStart + 1;
+
+      while (braceCount > 0 && currentIndex < js.length) {
+        const char = js[currentIndex];
+        if (char === "{") {
+          braceCount++;
+        } else if (char === "}") {
+          braceCount--;
+        }
+        currentIndex++;
+      }
+
+      if (braceCount > 0) {
+        throw new Error("Could not find matching closing brace for function");
+      }
+
+      const functionEnd = currentIndex;
+      const completeFunction = js.substring(functionStart, functionEnd);
+
+      console.log("getDecipherFunction: Complete function length:", completeFunction.length);
+      console.log("getDecipherFunction: Complete function:", completeFunction.substring(0, 200) + "...");
+      console.log(
+        "getDecipherFunction: Function end:",
+        completeFunction.substring(completeFunction.length - 20)
+      );
+
+      // Wrap the function definition to properly evaluate and return the function
+      let executableCode;
+      if (actualPattern.includes("=function")) {
+        // For patterns like "D7=function", extract just the function part
+        const functionPart = completeFunction.substring(completeFunction.indexOf("function"));
+        console.log("getDecipherFunction: Raw function part:", functionPart.substring(0, 200) + "...");
+        console.log("getDecipherFunction: Full function part length:", functionPart.length);
+        console.log(
+          "getDecipherFunction: Function part end:",
+          functionPart.substring(functionPart.length - 50)
+        );
+
+        // Try to validate the function syntax before wrapping
+        try {
+          executableCode = `(${functionPart})`;
+          console.log(
+            "getDecipherFunction: Wrapped function code:",
+            executableCode.substring(0, 100) + "..."
+          );
+
+          // Test if the syntax is valid by trying to parse it
+          const testFunc = eval(executableCode);
+          console.log("getDecipherFunction: Function created successfully, type:", typeof testFunc);
+          return testFunc;
+        } catch (syntaxError) {
+          console.error("getDecipherFunction: Syntax error in extracted function:", syntaxError.message);
+          console.log("getDecipherFunction: Problematic code:", functionPart);
+          throw new Error(`Invalid function syntax: ${syntaxError.message}`);
+        }
+      } else {
+        // For other patterns, use as-is
+        executableCode = completeFunction;
+        return eval(executableCode);
+      }
+    } catch (error) {
+      console.error("getDecipherFunction: Error during parsing:", error);
+      console.error("getDecipherFunction: Error details:", error.message);
+      throw error;
+    }
   };
 
-  const baseContent = await getRemote(`https://www.youtube.com${playerData.PLAYER_JS_URL}`);
-  const decipher = getDecipherFunction(baseContent);
+  try {
+    console.log("getAdaptiveFormats: Fetching player JS content");
+    const baseContent = await getRemote(`https://www.youtube.com${playerData.PLAYER_JS_URL}`);
+    console.log("getAdaptiveFormats: Player JS content length:", baseContent.length);
+    console.log("getAdaptiveFormats: Player JS first 200 chars:", baseContent.substring(0, 200));
 
-  const {
-    streamingData: { adaptiveFormats }
-  } = videoData;
+    console.log("getAdaptiveFormats: Calling getDecipherFunction");
+    const decipher = getDecipherFunction(baseContent);
+    console.log("getAdaptiveFormats: Successfully created decipher function");
 
-  adaptiveFormats.forEach(format => {
-    format.url = getUrlFromSignature(format.signatureCipher);
-    delete format.signatureCipher;
-  });
+    const getUrlFromSignature = (signatureCipher: string): string => {
+      const searchParams = new URLSearchParams(signatureCipher);
+      const [url, signature, sp] = [searchParams.get("url"), searchParams.get("s"), searchParams.get("sp")];
 
-  return adaptiveFormats;
+      return `${url}&${sp}=${decipher(signature)}`;
+    };
+
+    const {
+      streamingData: { adaptiveFormats }
+    } = videoData;
+
+    console.log("getAdaptiveFormats: Processing", adaptiveFormats.length, "adaptive formats");
+
+    adaptiveFormats.forEach(format => {
+      format.url = getUrlFromSignature(format.signatureCipher);
+      delete format.signatureCipher;
+    });
+
+    return adaptiveFormats;
+  } catch (error) {
+    console.error("getAdaptiveFormats: Error in adaptive formats processing:", error);
+    throw error;
+  }
 }
 
 async function getDownloadableLinks(formats: AdaptiveFormatItem[] | FormatItem[]) {

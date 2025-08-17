@@ -31,6 +31,7 @@ export async function handleVideo(): Promise<void> {
   const getHtml = async () => {
     const abortController = new AbortController();
     gCancelControllers.push(abortController);
+    console.log(`Fetching html for ${location.href}`);
     const response = await fetch(location.href, {
       signal: abortController.signal
     });
