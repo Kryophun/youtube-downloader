@@ -285,8 +285,38 @@ async function processVideo({
   };
 
   const [responseVideo, responseAudio] = await Promise.all([
-    fetch(urls.video, { signal: abortVideo.signal }),
-    fetch(urls.audio, { signal: abortAudio.signal })
+    fetch(urls.video, {
+      signal: abortVideo.signal,
+      method: "GET",
+      headers: {
+        Referer: "https://www.youtube.com/",
+        "User-Agent": navigator.userAgent,
+        Origin: "https://www.youtube.com",
+        Accept: "*/*",
+        "Accept-Encoding": "identity",
+        "Accept-Language": "en-US,en;q=0.9",
+        Connection: "keep-alive",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "cross-site"
+      }
+    }),
+    fetch(urls.audio, {
+      signal: abortAudio.signal,
+      method: "GET",
+      headers: {
+        Referer: "https://www.youtube.com/",
+        "User-Agent": navigator.userAgent,
+        Origin: "https://www.youtube.com",
+        Accept: "*/*",
+        "Accept-Encoding": "identity",
+        "Accept-Language": "en-US,en;q=0.9",
+        Connection: "keep-alive",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "cross-site"
+      }
+    })
   ]);
   const [filenameVideo, filenameAudio, filenameOutputTemp] = [
     `${videoId}-video.${mimeToExt(responseVideo)}`,
@@ -341,33 +371,74 @@ async function processSingleMedia({
   filenameOutput: string;
   videoId: string;
 }) {
-  if (type !== "video+audio") {
-    const abortMedia = new AbortController();
-    gCancelControllers[videoId] = {
-      isAborted: false,
-      abortControllers: [abortMedia]
-    };
+  try {
+    if (type !== "video+audio") {
+      const abortMedia = new AbortController();
+      gCancelControllers[videoId] = {
+        isAborted: false,
+        abortControllers: [abortMedia]
+      };
 
-    abortMedia.signal.addEventListener("abort", () => sendRemovalSignal(videoId), { once: true });
-    const dataFile = await responseToUintArray(
-      await fetch(urls[type], {
-        signal: abortMedia.signal
-      }),
-      videoId
-    );
-    url = URL.createObjectURL(
-      new Blob([dataFile.buffer], {
-        type: getMimeType(filenameOutput)
+      abortMedia.signal.addEventListener("abort", () => sendRemovalSignal(videoId), { once: true });
+
+      console.log(`Downloading ${type} from:`, urls[type]);
+      console.log(`Output filename: ${filenameOutput}`);
+
+      // Skip Chrome downloads API for now and go straight to fetch method
+      // The Chrome API gets accepted but Edge blocks the actual download
+      console.log("Using fetch method directly to avoid browser blocking");
+
+      // Try fetch method - try minimal headers first
+      try {
+        const dataFile = await responseToUintArray(
+          await fetch(urls[type], {
+            signal: abortMedia.signal,
+            method: "GET",
+            headers: {
+              "User-Agent": navigator.userAgent
+            }
+          }),
+          videoId
+        );
+        url = URL.createObjectURL(
+          new Blob([dataFile.buffer], {
+            type: getMimeType(filenameOutput)
+          })
+        );
+        console.log("Fetch with minimal headers succeeded");
+      } catch (fetchError) {
+        console.log("Minimal headers failed, trying with Referer:", fetchError);
+        // Try with Referer if minimal headers fail
+        const dataFile = await responseToUintArray(
+          await fetch(urls[type], {
+            signal: abortMedia.signal,
+            method: "GET",
+            headers: {
+              Referer: "https://www.youtube.com/",
+              "User-Agent": navigator.userAgent
+            }
+          }),
+          videoId
+        );
+        url = URL.createObjectURL(
+          new Blob([dataFile.buffer], {
+            type: getMimeType(filenameOutput)
+          })
+        );
+        console.log("Fetch with Referer header succeeded");
+      }
+    }
+
+    chrome.downloads.download({ url, filename: getCompatibleFilename(filenameOutput) }, () =>
+      cleanupDownload({
+        url,
+        videoId
       })
     );
+  } catch (error) {
+    console.error("Error in processSingleMedia:", error);
+    sendRemovalSignal(videoId);
   }
-
-  chrome.downloads.download({ url, filename: getCompatibleFilename(filenameOutput) }, () =>
-    cleanupDownload({
-      url,
-      videoId
-    })
-  );
 }
 
 function handleSingleMediaProcessing(port: chrome.runtime.Port) {
@@ -526,28 +597,6 @@ function listenToTabs() {
       await removeMediaFromLists(message.videoIdsToCancel);
     }
   });
-}
-
-function delay() {
-  return new Promise(resolve => setTimeout(resolve, 500));
-}
-
-async function processCurrentVideoWhenAvailable() {
-  while (1) {
-    console.log(`Trying to process current video...`);
-    const videoId = gVideoQueue[0];
-    if (!videoId || !gFfmpeg.isLoaded()) {
-      console.log(`No video to process; sleeping...`);
-      await delay();
-      continue;
-    }
-
-    console.log(`Processing video ${videoId}...`);
-    await processVideo({
-      videoId,
-      ...gVideoDetails.value[videoId]
-    });
-  }
 }
 
 function addListeners() {
